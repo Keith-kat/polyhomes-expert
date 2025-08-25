@@ -1,4 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
+  // Define API Base URL at the top for consistency
+  const API_BASE_URL = 'https://expertpolyhomes.onrender.com';
+
   // DOM Elements
   const elements = {
     // Auth Elements
@@ -156,12 +159,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const phone = document.getElementById('mpesaPhone').value;
         const amount = Math.round(state.quoteData.totalCost * 0.5) || 2500;
         const quoteId = state.quoteData.id || '12345';
-        if (!phone || !/^\d{10}$/.test(phone)) {
-          showNotification('Please enter a valid 10-digit phone number.', 'error');
+        if (!phone || !/^\+?254\d{9}$/.test(phone)) {
+          showNotification('Please enter a valid Kenyan phone number (e.g., +254712345678).', 'error');
           return;
         }
         try {
-          const res = await fetch('/api/mpesa-pay', {
+          const res = await fetch(`${API_BASE_URL}/api/mpesa-pay`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -170,6 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({ phone, amount, quoteId })
           });
           const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Payment request failed');
           showNotification(data.message, data.success ? 'success' : 'error');
           if (data.success) {
             document.getElementById('mpesaModal').style.display = 'none';
@@ -177,7 +181,7 @@ document.addEventListener('DOMContentLoaded', function() {
           }
         } catch (error) {
           console.error('M-Pesa payment error:', error);
-          showNotification('Failed to initiate M-Pesa payment.', 'error');
+          showNotification(`Failed to initiate M-Pesa payment: ${error.message}`, 'error');
         }
       });
     }
@@ -204,7 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const email = document.getElementById('signInEmail').value;
         const password = document.getElementById('signInPassword').value;
         try {
-          const response = await fetch('/api/login', {
+          const response = await fetch(`${API_BASE_URL}/api/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
@@ -218,11 +222,11 @@ document.addEventListener('DOMContentLoaded', function() {
             fetchUserData();
             showNotification('Signed in successfully!', 'success');
           } else {
-            showNotification('Invalid email or password.', 'error');
+            showNotification(data.message || 'Invalid email or password.', 'error');
           }
         } catch (error) {
           console.error('Sign-in error:', error);
-          showNotification('Error signing in.', 'error');
+          showNotification('Error signing in: Network issue or server unavailable.', 'error');
         }
       });
     }
@@ -257,7 +261,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const email = document.getElementById('registerEmail').value;
         const password = document.getElementById('registerPassword').value;
         try {
-          const response = await fetch('/api/register', {
+          const response = await fetch(`${API_BASE_URL}/api/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, email, password })
@@ -271,11 +275,11 @@ document.addEventListener('DOMContentLoaded', function() {
             fetchUserData();
             showNotification('Account created successfully!', 'success');
           } else {
-            showNotification('Error creating account: ' + data.message, 'error');
+            showNotification(`Error creating account: ${data.message}`, 'error');
           }
         } catch (error) {
           console.error('Register error:', error);
-          showNotification('Error creating account.', 'error');
+          showNotification('Error creating account: Network issue or server unavailable.', 'error');
         }
       });
     }
@@ -295,7 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const rating = reviewForm.querySelector('select[name="rating"]').value;
         const comment = reviewForm.querySelector('textarea[name="comment"]').value;
         try {
-          const response = await fetch('/api/reviews', {
+          const response = await fetch(`${API_BASE_URL}/api/reviews`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -309,11 +313,11 @@ document.addEventListener('DOMContentLoaded', function() {
             reviewForm.reset();
             fetchReviews();
           } else {
-            showNotification('Error submitting review.', 'error');
+            showNotification(`Error submitting review: ${data.message}`, 'error');
           }
         } catch (error) {
           console.error('Review submission error:', error);
-          showNotification('Error submitting review.', 'error');
+          showNotification('Error submitting review: Network issue or server unavailable.', 'error');
         }
       });
     }
@@ -332,7 +336,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const width = document.getElementById('arWidth').value;
         const height = document.getElementById('arHeight').value;
         try {
-          const response = await fetch('/api/quotes', {
+          const response = await fetch(`${API_BASE_URL}/api/quotes`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -354,11 +358,11 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Quote generated! Total: KES ${data.quote.totalCost}`, 'success');
             closeArModal();
           } else {
-            showNotification('Error generating quote.', 'error');
+            showNotification(`Error generating quote: ${data.message}`, 'error');
           }
         } catch (error) {
           console.error('Quote submission error:', error);
-          showNotification('Error submitting measurements.', 'error');
+          showNotification('Error submitting measurements: Network issue or server unavailable.', 'error');
         }
       });
     }
@@ -374,13 +378,20 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function fetchUserData() {
-    fetch('/api/user', {
+    fetch(`${API_BASE_URL}/api/user`, {
       headers: {
         'Authorization': `Bearer ${state.authToken}`
       }
     })
     .then(response => {
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          state.authToken = null;
+          showUnauthenticatedUI();
+          showNotification('Session expired. Please sign in again.', 'error');
+          throw new Error('Unauthorized');
+        }
         throw new Error('Invalid token');
       }
       return response.json();
@@ -535,7 +546,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const height = document.getElementById('windowHeight').value;
       const count = document.getElementById('windowCount').value;
       if (!width || !height || !count || width < 0.5 || height < 0.5 || count < 1) {
-        showNotification('Please enter valid window details.', 'error');
+        showNotification('Please enter valid window details (min 0.5m width/height, 1 window).', 'error');
         return false;
       }
     } else if (state.currentStep === 3) {
@@ -571,6 +582,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function handleQuoteSubmit(e) {
     e.preventDefault();
+    if (!state.authToken) {
+      showNotification('Please sign in to generate a quote.', 'error');
+      showAuthModal();
+      return;
+    }
     const formData = {
       windowCount: parseInt(state.quoteData.windowCount),
       measurements: [{ width: parseFloat(state.quoteData.windowWidth), height: parseFloat(state.quoteData.windowHeight) }],
@@ -583,11 +599,11 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     try {
-      const response = await fetch('/api/quotes', {
+      const response = await fetch(`${API_BASE_URL}/api/quotes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': state.authToken ? `Bearer ${state.authToken}` : ''
+          'Authorization': `Bearer ${state.authToken}`
         },
         body: JSON.stringify(formData)
       });
@@ -598,11 +614,11 @@ document.addEventListener('DOMContentLoaded', function() {
         showNotification(`Quote generated! Total: KES ${data.quote.totalCost}`, 'success');
         closeQuoteModal();
       } else {
-        showNotification('Error generating quote: ' + data.message, 'error');
+        showNotification(`Error generating quote: ${data.message}`, 'error');
       }
     } catch (error) {
       console.error('Quote error:', error);
-      showNotification('Error generating quote.', 'error');
+      showNotification('Error generating quote: Network issue or server unavailable.', 'error');
     }
   }
 
@@ -637,6 +653,11 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.configuratorForms.forEach(form => {
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!state.authToken) {
+          showNotification('Please sign in to add to quote.', 'error');
+          showAuthModal();
+          return;
+        }
         const type = form.dataset.type;
         const quantity = form.querySelector(`#${type}-quantity`).value;
         const material = form.querySelector(`#${type}-material`).value;
@@ -654,13 +675,20 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         state.quoteData.items.push(item);
         try {
-          const response = await fetch('/api/quotes', {
+          const response = await fetch(`${API_BASE_URL}/api/quotes`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': state.authToken ? `Bearer ${state.authToken}` : ''
+              'Authorization': `Bearer ${state.authToken}`
             },
-            body: JSON.stringify({ items: [item], warranty: 'basic' })
+            body: JSON.stringify({ 
+              windowCount: parseInt(quantity),
+              measurements: [{ width: parseFloat(width) / 100, height: parseFloat(height) / 100 }],
+              material,
+              type,
+              location: document.getElementById('installLocation')?.value || 'Nairobi',
+              warranty: 'basic'
+            })
           });
           const data = await response.json();
           if (data.success) {
@@ -669,11 +697,11 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Added ${quantity} ${type} net(s) to your quote! Total: KES ${data.quote.totalCost}`, 'success');
             form.reset();
           } else {
-            showNotification('Error adding to quote.', 'error');
+            showNotification(`Error adding to quote: ${data.message}`, 'error');
           }
         } catch (error) {
           console.error('Configurator error:', error);
-          showNotification('Error adding to quote.', 'error');
+          showNotification('Error adding to quote: Network issue or server unavailable.', 'error');
         }
       });
     });
@@ -714,7 +742,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let mesh;
     const loader = new THREE.GLTFLoader();
-    // Placeholder: Replace with actual GLTF model path
     loader.load('Assets/models/window_frames.glb', (gltf) => {
       mesh = gltf.scene;
       scene.add(mesh);
@@ -722,7 +749,7 @@ document.addEventListener('DOMContentLoaded', function() {
       mesh.position.set(0, 0, 0);
     }, undefined, (error) => {
       console.error('GLTF load error:', error);
-      // Fallback to simple box
+      showNotification('Error loading 3D model. Showing fallback.', 'error');
       const geometry = new THREE.BoxGeometry(2, 1, 0.1);
       const material = new THREE.MeshStandardMaterial({ color: 0x4ABDAC });
       mesh = new THREE.Mesh(geometry, material);
@@ -780,7 +807,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (elements.chatButton) {
       elements.chatButton.addEventListener('click', () => {
         showNotification('Live chat feature coming soon! Contact us at +254 723 544 097.', 'warning');
-        // Implement actual chat integration (e.g., Tawk.to, Intercom) here
       });
     }
   }
@@ -856,7 +882,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-      const response = await fetch('/api/coverage', {
+      const response = await fetch(`${API_BASE_URL}/api/coverage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: location })
@@ -865,11 +891,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (data.success) {
         elements.installTime.textContent = `${data.installationDays} business days`;
       } else {
-        showNotification('Error checking coverage: ' + data.message, 'error');
+        showNotification(`Error checking coverage: ${data.message}`, 'error');
       }
     } catch (error) {
       console.error('Coverage check error:', error);
-      showNotification('Error checking coverage.', 'error');
+      showNotification('Error checking coverage: Network issue or server unavailable.', 'error');
     }
   }
 
@@ -892,7 +918,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function fetchWeatherData() {
     try {
-      const response = await fetch('/api/weather', { timeout: 5000 });
+      const response = await fetch(`${API_BASE_URL}/api/weather`, { timeout: 5000 });
       const data = await response.json();
       if (data.success && elements.weatherDisplay) {
         elements.weatherDisplay.textContent = `${data.weather.location}: ${data.weather.temperature}°C, ${data.weather.condition}`;
@@ -923,7 +949,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Fetch and Display Reviews
   async function fetchReviews() {
     try {
-      const response = await fetch('/api/reviews');
+      const response = await fetch(`${API_BASE_URL}/api/reviews`);
       const data = await response.json();
       const reviewsContainer = document.getElementById('reviewsContainer');
       if (data.reviews && reviewsContainer) {
@@ -937,7 +963,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     } catch (error) {
       console.error('Fetch reviews error:', error);
-      showNotification('Error loading reviews.', 'error');
+      showNotification('Error loading reviews: Network issue or server unavailable.', 'error');
     }
   }
 
