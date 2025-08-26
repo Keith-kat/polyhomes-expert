@@ -1,6 +1,36 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  password: String,
+  createdAt: { type: Date, default: Date.now }
+});
+userSchema.methods.comparePassword = async function (password) {
+  return password === this.password; // Replace with bcrypt later
+};
+const User = mongoose.model('User', userSchema);
+
+const quoteSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  windowCount: Number,
+  dimensions: String,
+  material: String,
+  totalCost: Number,
+  createdAt: { type: Date, default: Date.now }
+});
+const Quote = mongoose.model('Quote', quoteSchema);
+
+const reviewSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  rating: Number,
+  comment: String,
+  approved: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+});
+const Review = mongoose.model('Review', reviewSchema);
 const cors = require('cors');
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:8080', 'http://127.0.0.1:5500', 'https://Keith-kat.github.io/polyhomes-expert'],
@@ -46,15 +76,9 @@ app.use('/api/', limiter);
 // =============================================
 // DATABASE CONNECTION
 // =============================================
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
+mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('✅ MongoDB connected successfully'))
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-    process.exit(1);
-  });
+  .catch(err => console.error('MongoDB connection error:', err));
 
 // =============================================
 // MODELS
@@ -159,115 +183,43 @@ app.get('/api/health', (req, res) => {
 });
 
 // Authentication Routes
-app.post('/api/register', [
-  body('name').trim().notEmpty().withMessage('Name is required'),
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
-
+app.post('/api/users/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(409).json({ success: false, message: 'Email already registered' });
-
-    const user = new User({
-      name,
-      email,
-      password: await bcrypt.hash(password, 12),
-      role: 'customer'
-    });
-
+    const user = new User({ name, email, password });
     await user.save();
-
-    const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    res.status(201).json({
-      success: true,
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
+    res.status(201).json({ success: true, message: 'User created' });
   } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ success: false, message: 'Server error during registration' });
+    res.status(500).json({ success: false, message: 'Error creating account' });
   }
 });
 
-app.post('/api/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
-
+app.post('/api/users/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
-
-    const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    res.status(200).json({
-      success: true,
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    res.json({ success: true, token, name: user.name });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ success: false, message: 'Server error during login' });
+    res.status(500).json({ success: false, message: 'Error logging in' });
   }
 });
 
 // Quote Routes
-app.post('/api/quotes', [
-  body('windowCount').isInt({ min: 1 }).withMessage('Window count must be at least 1'),
-  body('measurements').isArray().withMessage('Measurements must be an array'),
-  body('material').isIn(['fiberglass', 'polyester', 'stainless']).withMessage('Invalid material'),
-  body('type').isIn(['fixed', 'sliding', 'retractable', 'pleated', 'magnetic', 'velcro']).withMessage('Invalid type'),
-  body('location').notEmpty().withMessage('Location is required'),
-  body('warranty').isIn(['basic', 'standard', 'premium']).withMessage('Invalid warranty')
-], authenticateToken, async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
-
+app.post('/api/quotes', async (req, res) => {
   try {
-    const { windowCount, measurements, material, type, location, warranty } = req.body;
-    const totalArea = measurements.reduce((sum, m) => sum + (m.width * m.height), 0);
-
-    let baseCost = totalArea * pricingMatrix.materials[material];
-    baseCost *= pricingMatrix.types[type];
-    baseCost *= getLocationFactor(location);
-    const warrantyCost = totalArea * pricingMatrix.warranties[warranty];
-    const totalCost = baseCost + warrantyCost;
-
-    const quote = new Quote({
-      user: req.user.id,
-      windowCount,
-      measurements,
-      material,
-      type,
-      location,
-      warranty,
-      totalArea,
-      baseCost,
-      warrantyCost,
-      totalCost,
-      status: 'pending',
-      validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    });
-
+    const { windowCount, dimensions, material } = req.body;
+    const totalCost = calculateCost(windowCount, dimensions, material); // Implement logic
+    const quote = new Quote({ userId: req.body.userId, windowCount, dimensions, material, totalCost });
     await quote.save();
+    res.json({ success: true, quote });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to save quote' });
+  }
+});
 
     // Send SMS confirmation
     try {
@@ -453,6 +405,32 @@ app.post('/api/mpesa-pay', [
     });
 
     // Initiate STK Push
+    app.post('/api/mpesa/stk-push', async (req, res) => {
+  try {
+    const { phoneNumber, amount } = req.body;
+    const timestamp = getTimestamp();
+    const password = getPassword(timestamp);
+    const response = await axios.post('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest', {
+      BusinessShortCode: process.env.MPESA_SHORTCODE,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline',
+      Amount: amount,
+      PartyA: phoneNumber,
+      PartyB: process.env.MPESA_SHORTCODE,
+      PhoneNumber: phoneNumber,
+      CallBackURL: process.env.MPESA_CALLBACK_URL,
+      AccountReference: 'ExpertPolyHomes',
+      TransactionDesc: 'Payment for mesh'
+    }, {
+      headers: { Authorization: `Bearer ${await getAccessToken()}` }
+    });
+    res.json({ success: true, data: response.data });
+  } catch (error) {
+    console.error('M-Pesa error:', error);
+    res.status(500).json({ success: false, message: 'Failed to initiate M-Pesa payment' });
+  }
+});
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
     const password = Buffer.from(`${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
 
