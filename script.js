@@ -742,7 +742,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let mesh;
     const loader = new THREE.GLTFLoader();
-    loader.load('./public/Assets/models/window_frames.glb', (gltf) => {
+    loader.load('./Assets/models/window_frames.glb', (gltf) => {
       mesh = gltf.scene;
       scene.add(mesh);
       mesh.scale.set(1, 1, 1);
